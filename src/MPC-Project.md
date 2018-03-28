@@ -143,7 +143,7 @@ and
 ```
 double epsi = -atan(coeffs[1]); 
 ```
-### Parameter tuning
+### Parameter tuning and latency adjustments
 
 The initial parameter settings were taken from lesson 20.10 "Tuning MPC" with `N` = 25, `dt` - 0.05, `wt_delta` = 100, and `wt_delta_dot` = 500; All other weights were set to unity. With the latency set to 100 msec and reference velocity set to 40, the car would start well but swerve wildly at the left turn after the bridge. Removing the latency postponed the wild swerving by one corner.
 
