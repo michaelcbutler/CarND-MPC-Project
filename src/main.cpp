@@ -77,7 +77,7 @@ int main() {
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
     string sdata = string(data).substr(0, length);
-    cout << sdata << endl;
+    //cout << sdata << endl << endl;
     if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2') {
       string s = hasData(sdata);
       if (s != "") {
@@ -91,6 +91,8 @@ int main() {
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
+          double steer_value = j[1]["steering_angle"];
+          double throttle_value = j[1]["throttle"];
 
           /*
           * TODO: Calculate steering angle and throttle using MPC.
@@ -98,18 +100,58 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+          
+          // adjust px, py, psi for latency (acceleration is unknown)
+          const double latency = 0.1; // 100 msec
+          px += v*cos(psi)*latency;
+          py += v*sin(psi)*latency;
+          psi -= steer_value*v/MPC::Lf*latency;
+
+          // transform (x, y) points to vehicle coordinate system 
+          for (int i = 0; i < ptsx.size(); ++i) {
+            double dx = ptsx[i] - px;
+            double dy = ptsy[i] - py;
+            ptsx[i] = dx*cos(psi) + dy*sin(psi);
+            ptsy[i] = dy*cos(psi) - dx*sin(psi);
+          }
+
+          // fit a cubic polynomial to transformed (x, y) points
+          Eigen::VectorXd xvals = Eigen::Map<Eigen::VectorXd, Eigen::Unaligned>(ptsx.data(), ptsx.size());
+          Eigen::VectorXd yvals = Eigen::Map<Eigen::VectorXd, Eigen::Unaligned>(ptsy.data(), ptsy.size());
+          auto coeffs = polyfit(xvals, yvals, 3);
+
+          // cte = polyeval(coeffs, x) - y
+          // evaluate polynomial at x = 0 to give cte (since vehicle is at y = 0)
+          double cte = polyeval(coeffs, 0.0);
+
+          // epsi = psi - atan(f'(x))
+          // f'(x) = coeffs[1] + 2*x*coeffs[2] + 3*coeffs[3]*x*x
+          // f'(x=0) = coeffs[1]
+          // evaluate atan of cubic polynomial derivative at x = 0 to give epsi (since vehicle is at psi = 0)
+          double epsi = -atan(coeffs[1]); 
+
+          Eigen::VectorXd state(6); // x, y, psi, v, cte, epsi
+          state << 0.0, 0.0, 0.0, v, cte, epsi;
+
+          auto vars = mpc.Solve(state, coeffs);
+
+          //Display the MPC predicted trajectory 
+          vector<double> mpc_x_vals;
+          vector<double> mpc_y_vals;
+
+          // TODO: extract (x,y) steer and throttle from vars
+          steer_value = vars[0]/deg2rad(25);
+          throttle_value = vars[1];
+          for (int i = 1; i < MPC::N; i++) {
+            mpc_x_vals.push_back(vars[2 * i]);
+            mpc_y_vals.push_back(vars[2 * i + 1]);
+          }
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
           msgJson["steering_angle"] = steer_value;
           msgJson["throttle"] = throttle_value;
-
-          //Display the MPC predicted trajectory 
-          vector<double> mpc_x_vals;
-          vector<double> mpc_y_vals;
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
@@ -124,12 +166,12 @@ int main() {
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
 
-          msgJson["next_x"] = next_x_vals;
-          msgJson["next_y"] = next_y_vals;
+          msgJson["next_x"] = ptsx;
+          msgJson["next_y"] = ptsy;
 
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
+          //std::cout << msg << std::endl << std::endl;
           // Latency
           // The purpose is to mimic real driving conditions where
           // the car does actuate the commands instantly.
@@ -139,7 +181,8 @@ int main() {
           //
           // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
           // SUBMITTING.
-          this_thread::sleep_for(chrono::milliseconds(100));
+          const int msec = latency*1000;
+          this_thread::sleep_for(chrono::milliseconds(msec));
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
       } else {
