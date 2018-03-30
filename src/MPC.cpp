@@ -21,7 +21,7 @@ using CppAD::AD;
 
 // NOTE: feel free to play around with this
 // or do something completely different
-const double ref_v = 75;
+const double ref_v = 40;
 const double ref_cte = 0.0;
 const double ref_epsi = 0.0;
 
